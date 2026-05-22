@@ -63,8 +63,8 @@ interface ControlHubProps {
   // Session & Overlay Logic
   pausedBy?: string | null;
   sessionStatus?: string | null;
-  onTogglePause: () => void;
-  onEndSession: () => void;
+  togglePause: () => void;
+  endSession: () => void;
   onScanForDevices?: () => void;
 }
 
@@ -220,7 +220,7 @@ export function ControlHub(props: ControlHubProps) {
                 <AlertTriangle className="w-12 h-12 text-destructive mx-auto" />
                 <h3 className="text-white font-bold text-xl uppercase italic">End Session?</h3>
                 <div className="flex flex-col gap-2">
-                  <Button variant="destructive" onClick={() => { props.onEndSession(); setShowEndConfirmation(false); }}>Confirm</Button>
+                  <Button variant="destructive" onClick={() => { props.endSession(); setShowEndConfirmation(false); }}>Confirm</Button>
                   <Button variant="ghost" onClick={() => setShowEndConfirmation(false)}>Cancel</Button>
                 </div>
               </div>
@@ -408,7 +408,7 @@ export function ControlHub(props: ControlHubProps) {
         <div className="p-6 bg-zinc-900/40 border-t border-white/5 shrink-0 space-y-4">
           <Button 
             variant="ghost" 
-            onClick={props.onTogglePause} 
+            onClick={props.togglePause} 
             className="w-full h-16 rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground border border-primary/20 font-black uppercase tracking-widest italic gap-3 group transition-all"
           >
             {isPaused ? <Play className="w-5 h-5 fill-current" /> : <Pause className="w-5 h-5 fill-current" />}
@@ -432,7 +432,7 @@ export function ControlHub(props: ControlHubProps) {
           sessionStatus={props.sessionStatus || null}
           role={props.role}
           hasDevices={hasDevices}
-          onTogglePause={props.onTogglePause}
+          onTogglePause={props.togglePause}
           onScan={props.onScanForDevices}
         />
       </div>

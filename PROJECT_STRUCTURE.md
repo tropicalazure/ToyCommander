@@ -3,12 +3,6 @@
 
 This is the definitive map of the application. All development happens within these core directories.
 
-## 📂 `src/ai` (Generative AI)
-Genkit integration and AI agent logic.
-- `genkit.ts`: Core AI initialization.
-- `dev.ts`: Developer tool hooks.
-- `flows/`: Workflow definitions for AI operations.
-
 ## 📂 `src/app` (Semantic Routing)
 The app is organized by feature domain.
 - `page.tsx`: Landing page.
