@@ -6,9 +6,44 @@ let pendingVibration: number | null = null;
 let hardwareOperationPromise: Promise<any> = Promise.resolve();
 let isProcessingVibration = false;
 let activeDeviceIndices: Set<number> = new Set();
+let connectionMode: 'wasm' | 'intiface' = 'wasm';
+
+export function getConnectionMode(): 'wasm' | 'intiface' {
+  return connectionMode;
+}
+
+function attachDeviceListeners(c: any) {
+  c.on("deviceadded", (device: any) => {
+    activeDeviceIndices.add(device.index);
+    console.log(`[ToyClient] Device armed: ${device.name} (ID: ${device.index})`);
+  });
+  c.on("deviceremoved", (device: any) => {
+    activeDeviceIndices.delete(device.index);
+    console.log(`[ToyClient] Device lost: ${device.name}`);
+  });
+}
 
 /**
- * Initializes the Buttplug client with the WASM connector.
+ * Tears down any active client so a new connector can be used.
+ */
+export async function disconnectToyClient() {
+  if (!client) return;
+  try {
+    await client.stopAllDevices();
+    await client.disconnect();
+  } catch {}
+  client = null;
+  connectionMode = 'wasm';
+  activeDeviceIndices.clear();
+  lastSentVibration = -1;
+  pendingVibration = null;
+  isProcessingVibration = false;
+  hardwareOperationPromise = Promise.resolve();
+  console.log("[ToyClient] Disconnected and reset.");
+}
+
+/**
+ * Initializes the Buttplug client with the in-browser WASM connector (WebBluetooth).
  */
 export async function initToyClient() {
   if (client) return client;
@@ -16,8 +51,8 @@ export async function initToyClient() {
   client = new ButtplugClient("ToyCommander");
   const connector = new ButtplugWasmClientConnector();
   await client.connect(connector);
-  
-  console.log("[ToyClient] Engine initialized and connected.");
+  connectionMode = 'wasm';
+  console.log("[ToyClient] WASM engine initialized.");
 
   if (client.devices) {
     client.devices.forEach((d: any) => {
@@ -25,17 +60,32 @@ export async function initToyClient() {
       console.log(`[ToyClient] Pre-connected device armed: ${d.name} (ID: ${d.index})`);
     });
   }
-  
-  client.on("deviceadded", (device: any) => {
-    activeDeviceIndices.add(device.index);
-    console.log(`[ToyClient] New device discovered and armed: ${device.name} (ID: ${device.index})`);
-  });
-  
-  client.on("deviceremoved", (device: any) => {
-    activeDeviceIndices.delete(device.index);
-    console.log(`[ToyClient] Device lost: ${device.name}`);
-  });
 
+  attachDeviceListeners(client);
+  return client;
+}
+
+/**
+ * Initializes the Buttplug client connected to a running Intiface Central server.
+ * Throws if the server is unreachable.
+ */
+export async function initToyClientIntiface(serverUrl: string) {
+  await disconnectToyClient();
+  const { ButtplugClient, ButtplugBrowserWebsocketClientConnector } = await loadButtplugEsm();
+  client = new ButtplugClient("ToyCommander");
+  const connector = new ButtplugBrowserWebsocketClientConnector(serverUrl);
+  await client.connect(connector); // throws if Intiface is not running
+  connectionMode = 'intiface';
+  console.log(`[ToyClient] Connected to Intiface Central at ${serverUrl}`);
+
+  if (client.devices) {
+    client.devices.forEach((d: any) => {
+      activeDeviceIndices.add(d.index);
+      console.log(`[ToyClient] Intiface device armed: ${d.name} (ID: ${d.index})`);
+    });
+  }
+
+  attachDeviceListeners(client);
   return client;
 }
 
@@ -123,7 +173,6 @@ export async function applyVibrationSafe(val: number) {
 
   const currentClient = getClient();
   if (!currentClient || !currentClient.connected || currentClient.devices.length === 0) {
-    lastSentVibration = val;
     return;
   }
 

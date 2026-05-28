@@ -5,6 +5,7 @@
 export async function loadButtplugEsm(): Promise<{
   ButtplugClient: any;
   ButtplugWasmClientConnector: any;
+  ButtplugBrowserWebsocketClientConnector: any;
 }> {
   // Use a dynamic import bypass to prevent Turbopack from attempting to resolve remote URLs
   const importRemote = (url: string) => new Function(`return import("${url}")`)();
@@ -21,6 +22,7 @@ export async function loadButtplugEsm(): Promise<{
     return {
       ButtplugClient: buttplugMod.ButtplugClient,
       ButtplugWasmClientConnector: wasmMod.ButtplugWasmClientConnector,
+      ButtplugBrowserWebsocketClientConnector: buttplugMod.ButtplugBrowserWebsocketClientConnector,
     };
   } catch (error) {
     console.error("Failed to load Buttplug modules from CDN:", error);

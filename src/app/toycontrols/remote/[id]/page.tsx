@@ -1,7 +1,7 @@
 
 "use client";
 
-import { use } from "react";
+import { use, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { 
@@ -14,7 +14,6 @@ import { ControlHub } from "@/components/features/toycontrols/control-hub";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { useControlSession } from "@/hooks/use-control-session";
 import { useVibrationEngine } from "@/hooks/use-vibration-engine";
-import { SessionOverlays } from "@/components/features/toycontrols/session-overlays";
 
 export default function RemoteControlPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -26,6 +25,27 @@ export default function RemoteControlPage({ params }: { params: Promise<{ id: st
   });
 
   useWakeLock(true);
+
+  // Keep a fresh ref so the interval below always reads the latest engine state
+  // without needing to re-register the interval on every render.
+  const engineRef = useRef(engine);
+  engineRef.current = engine;
+
+  // Save a snapshot to RTDB whenever the active pattern/mode changes, and
+  // every 5 seconds as a keep-alive. The host reads this when real-time
+  // updates stop and runs the pattern locally until the connection recovers.
+  useEffect(() => {
+    const save = () => session.saveSnapshot({
+      mode: engineRef.current.mode,
+      patternType: engineRef.current.patternType,
+      speed: engineRef.current.pulseSpeed,
+      manualValue: engineRef.current.manualValue,
+    });
+
+    save();
+    const interval = setInterval(save, 5000);
+    return () => clearInterval(interval);
+  }, [engine.mode, engine.patternType, engine.pulseSpeed, session.saveSnapshot]);
 
   const sessionControls = (
     <div className="flex items-center gap-1">
@@ -50,20 +70,13 @@ export default function RemoteControlPage({ params }: { params: Promise<{ id: st
       <div className="flex-1 flex flex-col items-center">
         <div className="max-w-xl w-full space-y-6 md:space-y-10">
           <div className="relative w-full">
-            <ControlHub 
+            <ControlHub
               {...engine}
               {...session}
               role="remote"
               disabled={session.pausedBy !== null || session.sessionStatus === 'ended'}
               sessionActions={sessionControls}
               onUIChange={session.updateUIState}
-            />
-
-            <SessionOverlays 
-              role="remote"
-              pausedBy={session.pausedBy}
-              sessionStatus={session.sessionStatus}
-              onTogglePause={session.togglePause}
             />
           </div>
         </div>

@@ -34,6 +34,82 @@ import { cn } from "@/lib/utils";
 import { SessionOverlays } from "./session-overlays";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 
+// --- Audio bar multipliers — deterministic per-bar height scaling, no Math.random() ---
+const AUDIO_BAR_MULTIPLIERS = [0.40, 0.70, 0.90, 0.60, 1.00, 0.80, 0.50, 0.90, 0.70, 0.45, 0.85, 0.60];
+
+// --- Pattern Card Configs ---
+const PATTERN_CONFIGS: Record<string, { accent: string; wave: string }> = {
+  pulse:     {
+    accent: '#c084fc',
+    wave: 'M 0 14 C 6 3 12 3 16 14 C 20 25 26 25 32 14 C 38 3 44 3 48 14 C 52 25 58 25 64 14 C 70 3 76 3 80 14 C 84 25 90 25 96 14 L 100 13',
+  },
+  heartbeat: {
+    accent: '#fb7185',
+    wave: 'M 0 14 L 18 14 L 22 9 L 26 19 L 30 4 L 34 24 L 38 9 L 42 14 L 60 14 L 64 9 L 68 19 L 72 4 L 76 24 L 80 9 L 84 14 L 100 14',
+  },
+  waves:     {
+    accent: '#22d3ee',
+    wave: 'M 0 14 C 16 8 22 6 34 14 C 46 22 52 24 66 14 C 80 6 86 4 100 12',
+  },
+  erratic:   {
+    accent: '#fb923c',
+    wave: 'M 0 14 L 7 5 L 11 21 L 16 8 L 22 20 L 28 10 L 33 23 L 38 5 L 44 19 L 50 11 L 56 24 L 62 7 L 67 18 L 74 4 L 80 21 L 86 9 L 93 22 L 100 14',
+  },
+  surge:     {
+    accent: '#60a5fa',
+    wave: 'M 0 26 L 8 25 C 22 23 34 20 46 16 C 60 12 72 7 82 4 L 90 2 L 96 1 L 100 1',
+  },
+  fireworks: {
+    accent: '#fbbf24',
+    wave: 'M 0 14 L 6 14 L 8 8 L 11 20 L 14 5 L 17 23 L 20 10 L 23 14 L 34 14 L 36 8 L 39 20 L 42 5 L 45 23 L 48 10 L 51 14 L 63 14 L 65 8 L 68 20 L 71 5 L 74 23 L 77 10 L 80 14 L 90 14 L 93 8 L 96 20 L 100 14',
+  },
+  breath: {
+    accent: '#86efac',
+    wave: 'M 0 27 L 16 27 C 24 27 32 2 44 2 L 56 2 C 68 2 76 27 84 27 L 100 27',
+  },
+  flutter: {
+    accent: '#f472b6',
+    wave: 'M 0 14 C 2 9 4 19 6 14 C 8 9 10 19 12 14 C 14 9 16 19 18 14 C 20 9 22 19 24 14 C 26 9 28 19 30 14 C 32 9 34 19 36 14 C 38 9 40 19 42 14 C 44 9 46 19 48 14 C 50 9 52 19 54 14 C 56 9 58 19 60 14 C 62 9 64 19 66 14 C 68 9 70 19 72 14 C 74 9 76 19 78 14 C 80 9 82 19 84 14 C 86 9 88 19 90 14 C 92 9 94 19 96 14 L 100 14',
+  },
+  avalanche: {
+    accent: '#94a3b8',
+    wave: 'M 0 26 C 20 25 40 22 60 16 C 74 11 82 6 88 3 L 90 2 L 91 26 L 100 26',
+  },
+  morse: {
+    accent: '#4ade80',
+    wave: 'M 0 14 L 0 5 L 5 5 L 5 14 L 7 14 L 7 5 L 12 5 L 12 14 L 14 14 L 14 5 L 19 5 L 19 14 L 25 14 L 25 4 L 34 4 L 34 14 L 36 14 L 36 4 L 45 4 L 45 14 L 47 14 L 47 4 L 56 4 L 56 14 L 62 14 L 62 5 L 67 5 L 67 14 L 69 14 L 69 5 L 74 5 L 74 14 L 76 14 L 76 5 L 81 5 L 81 14 L 100 14',
+  },
+  engine: {
+    accent: '#a78bfa',
+    wave: 'M 0 4 L 9 4 L 9 22 L 18 22 L 18 4 L 27 4 L 27 22 L 36 22 L 36 4 L 45 4 L 45 22 L 54 22 L 54 4 L 63 4 L 63 22 L 72 22 L 72 4 L 81 4 L 81 22 L 90 22 L 90 4 L 100 4',
+  },
+  earthquake: {
+    accent: '#d97706',
+    wave: 'M 0 22 C 5 21 8 22 12 20 L 14 20 L 15 6 L 17 22 C 22 21 28 22 34 20 L 36 20 L 38 4 L 40 22 C 46 21 52 22 58 20 L 60 20 L 61 5 L 63 22 C 70 21 76 22 82 20 L 84 20 L 86 3 L 88 22 C 92 21 96 22 100 20',
+  },
+  ocean: {
+    accent: '#818cf8',
+    wave: 'M 0 14 C 10 24 20 26 34 14 C 46 3 56 2 68 14 C 80 26 90 26 100 14',
+  },
+  drip: {
+    accent: '#38bdf8',
+    wave: 'M 0 26 L 2 26 L 3 3 C 5 10 7 22 10 26 L 36 26 L 38 3 C 40 10 42 22 45 26 L 68 26 L 70 3 C 72 10 74 22 77 26 L 100 26',
+  },
+  climb: {
+    accent: '#34d399',
+    wave: 'M 0 25 L 12 25 L 12 21 L 24 21 L 24 17 L 36 17 L 36 13 L 48 13 L 48 9 L 60 9 L 60 5 L 72 5 L 72 3 L 84 3 L 86 27 L 100 27',
+  },
+  throb: {
+    accent: '#f43f5e',
+    wave: 'M 0 3 C 4 12 8 22 16 26 L 25 26 L 26 3 C 30 12 34 22 42 26 L 51 26 L 52 3 C 56 12 60 22 68 26 L 77 26 L 78 3 C 82 12 86 22 94 26 L 100 26',
+  },
+  ripple: {
+    accent: '#2dd4bf',
+    wave: 'M 0 14 C 6 7 12 21 18 14 C 22 9 26 19 30 14 C 38 5 46 23 54 14 C 60 9 66 19 72 14 C 80 4 88 24 96 14 L 100 14',
+  },
+};
+const DEFAULT_PATTERN_CONFIG = { accent: '#a1a1aa', wave: 'M 0 14 C 25 8 75 20 100 14' };
+
 // --- Types ---
 interface ControlHubProps {
   mode: string;
@@ -150,7 +226,7 @@ export function ControlHub(props: ControlHubProps) {
     const id = crypto.randomUUID();
     dispatchRipples({ type: 'ADD', payload: { id, x: nX * 100, y: nY * 100 } });
     setTimeout(() => dispatchRipples({ type: 'REMOVE', payload: id }), 800);
-  }, [props]);
+  }, [props.setManualValue]);
 
   const onInteractionMove = useCallback((e: MouseEvent | TouchEvent) => {
     if (!isInteracting) return;
@@ -165,7 +241,7 @@ export function ControlHub(props: ControlHubProps) {
       props.setManualValue(0);
       setLocalIntensity(0);
     }
-  }, [props, isMomentary]);
+  }, [props.setManualValue, isMomentary]);
 
   useEffect(() => {
     if (isInteracting) {
@@ -306,7 +382,7 @@ export function ControlHub(props: ControlHubProps) {
 
         <div className="grid grid-cols-3 bg-zinc-900 border-b border-white/5">
             {[{ id: 'manual', icon: Sliders, label: 'Manual' }, { id: 'patterns', icon: Zap, label: 'Patterns' }, { id: 'audio', icon: Mic, label: 'Audio' }].map((m) => (
-              <button key={m.id} onClick={() => props.setMode(m.id)} className={cn("flex flex-col items-center justify-center gap-1.5 py-4 transition-all relative group", activeMode === m.id ? "text-primary bg-zinc-800/50" : "text-zinc-600 hover:text-white hover:bg-zinc-800")}>
+              <button key={m.id} onClick={() => props.setMode(m.id)} disabled={!!props.disabled} className={cn("flex flex-col items-center justify-center gap-1.5 py-4 transition-all relative group", activeMode === m.id ? "text-primary bg-zinc-800/50" : "text-zinc-600 hover:text-white hover:bg-zinc-800", props.disabled && "opacity-40")}>
                 <m.icon className="w-4 h-4" />
                 <span className="text-[8px] font-black uppercase tracking-widest">{m.label}</span>
                 {activeMode === m.id && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />}
@@ -327,7 +403,7 @@ export function ControlHub(props: ControlHubProps) {
                   {subMode === 'slider' ? (
                     <div className="h-full flex flex-col justify-center gap-12 px-8">
                         <div className="text-center"><span className="text-8xl font-black text-white tabular-nums">{Math.round(displayIntensity)}</span><span className="text-3xl font-black text-primary ml-1">%</span></div>
-                        <Slider value={[displayIntensity]} max={100} onValueChange={(v) => { setLocalIntensity(v[0]); props.setManualValue(v[0]/100); }} />
+                        <Slider value={[displayIntensity]} max={100} disabled={isGhostMode || !!props.disabled} onValueChange={(v) => { setLocalIntensity(v[0]); props.setManualValue(v[0]/100); }} />
                     </div>
                   ) : (
                     <div ref={touchAreaRef} onMouseDown={handleInteractionStart} onTouchStart={handleInteractionStart} className="relative h-full w-full bg-black border-2 border-white/5 rounded-3xl overflow-hidden cursor-crosshair touch-none group">
@@ -355,13 +431,45 @@ export function ControlHub(props: ControlHubProps) {
             )}
 
             {activeMode === 'patterns' && (
-              <motion.div key="patterns" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-2 md:grid-cols-4 gap-4 overflow-y-auto no-scrollbar">
-                {props.availablePatterns?.map(pat => (
-                  <button key={pat} onClick={() => props.setPattern(pat)} className={cn("p-6 rounded-2xl border text-left transition-all h-32 flex flex-col justify-between group", displayPattern === pat ? "bg-primary border-primary text-white" : "bg-zinc-900 border-white/5 text-zinc-500 hover:border-white/20")}>
-                    <Zap className={cn("w-6 h-6", displayPattern === pat ? "fill-white" : "group-hover:text-white transition-colors")} />
-                    <span className="text-xs font-black uppercase tracking-widest">{pat}</span>
-                  </button>
-                ))}
+              <motion.div key="patterns" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-wrap justify-center gap-3 overflow-y-auto no-scrollbar content-start">
+                {props.availablePatterns?.map(pat => {
+                  const cfg = PATTERN_CONFIGS[pat] ?? DEFAULT_PATTERN_CONFIG;
+                  const isActive = displayPattern === pat;
+                  return (
+                    <button
+                      key={pat}
+                      onClick={() => !(isGhostMode || props.disabled) && props.setPattern(pat)}
+                      disabled={isGhostMode || !!props.disabled}
+                      className="w-[calc(50%-6px)] md:w-[calc(25%-9px)] h-36 rounded-2xl border transition-all duration-300 active:scale-95 overflow-hidden flex flex-col px-4 pt-4 pb-3 bg-zinc-900 hover:bg-zinc-800/80 disabled:opacity-40 disabled:cursor-not-allowed"
+                      style={isActive ? {
+                        borderColor: cfg.accent,
+                        background: `radial-gradient(ellipse at 50% -20%, ${cfg.accent}22 0%, transparent 70%), #111113`,
+                        boxShadow: `0 0 28px ${cfg.accent}28, inset 0 1px 0 ${cfg.accent}30`,
+                      } : { borderColor: 'transparent' }}
+                    >
+                      <div className="flex-1 flex items-center">
+                        <svg viewBox="0 0 100 28" fill="none" className="w-full" preserveAspectRatio="none">
+                          {isActive && (
+                            <path d={cfg.wave} stroke={cfg.accent} strokeWidth={7} strokeLinecap="round" strokeLinejoin="round" opacity={0.18} />
+                          )}
+                          <path
+                            d={cfg.wave}
+                            stroke={isActive ? cfg.accent : '#52525b'}
+                            strokeWidth={isActive ? 2 : 1.5}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </div>
+                      <span
+                        className="text-[9px] font-black uppercase tracking-[0.18em] mt-2 text-center w-full"
+                        style={{ color: isActive ? cfg.accent : '#71717a' }}
+                      >
+                        {pat}
+                      </span>
+                    </button>
+                  );
+                })}
               </motion.div>
             )}
 
@@ -377,11 +485,11 @@ export function ControlHub(props: ControlHubProps) {
                   />
                   <div className="relative h-full w-full rounded-full border-4 border-white/10 bg-black flex items-center justify-center overflow-hidden">
                     <div className="flex items-end gap-[3px] h-20">
-                      {[...Array(12)].map((_, i) => (
+                      {AUDIO_BAR_MULTIPLIERS.map((multiplier, i) => (
                         <motion.div
                           key={i}
-                          animate={{ 
-                            height: props.isAudioActive ? `${Math.max(10, (Math.random() * 0.5 + 0.5) * props.audioLevel * 100)}%` : '4px' 
+                          animate={{
+                            height: props.isAudioActive ? `${Math.max(10, multiplier * props.audioLevel * 100)}%` : '4px'
                           }}
                           className="w-1.5 bg-primary rounded-full opacity-60"
                         />

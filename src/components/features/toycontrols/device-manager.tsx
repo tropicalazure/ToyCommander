@@ -1,19 +1,23 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { 
-  Bluetooth, 
-  Smartphone, 
-  Plus, 
-  Cpu, 
-  Check, 
+import {
+  Bluetooth,
+  Smartphone,
+  Plus,
+  Cpu,
+  Check,
   Battery,
   BatteryMedium,
   BatteryFull,
   BatteryWarning,
   Square,
   Power,
-  PowerOff
+  PowerOff,
+  Server,
+  Loader2,
+  CircleDot,
+  Circle
 } from "lucide-react";
 import { 
   Dialog, 
@@ -26,15 +30,17 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  initToyClient, 
-  getClient, 
-  requestBatterySafe, 
+import {
+  initToyClient,
+  initToyClientIntiface,
+  disconnectToyClient,
+  getClient,
+  requestBatterySafe,
   stopAllDevices,
   getActiveDeviceIndices,
-  setActiveDevices,
-  applyVibrationSafe
+  setActiveDevices
 } from "@/lib/buttplug/toy-client";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "@/components/ui/sidebar";
@@ -53,10 +59,28 @@ export function DeviceManager() {
   const [armedIndices, setArmedIndices] = useState<number[]>([]);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
-  
+
+  // Connector mode: WebBluetooth (wasm) or Intiface Central (intiface)
+  const [connectorMode, setConnectorMode] = useState<'wasm' | 'intiface'>(() =>
+    (typeof window !== 'undefined' && localStorage.getItem('tc_connector_mode') as 'wasm' | 'intiface') || 'wasm'
+  );
+  const [intifaceUrl, setIntifaceUrl] = useState(() =>
+    (typeof window !== 'undefined' && localStorage.getItem('tc_intiface_url')) || 'ws://127.0.0.1:12345'
+  );
+  const [intifaceConnected, setIntifaceConnected] = useState(false);
+  const [isConnectingIntiface, setIsConnectingIntiface] = useState(false);
+
   const isUpdatingRef = useRef(false);
   const devicesRef = useRef<DeviceState[]>([]);
   const seenDeviceIndicesRef = useRef<Set<number>>(new Set());
+  // Refs to avoid stale closures in updateList
+  const connectorModeRef = useRef(connectorMode);
+  const intifaceConnectedRef = useRef(false);
+  useEffect(() => { connectorModeRef.current = connectorMode; }, [connectorMode]);
+  const setIntifaceConnectedBoth = (val: boolean) => {
+    intifaceConnectedRef.current = val;
+    setIntifaceConnected(val);
+  };
 
   const sidebarOffset = isMobile 
     ? "" 
@@ -82,10 +106,10 @@ export function DeviceManager() {
   useEffect(() => {
     const handleBeforeUnload = () => stopAllDevices();
     const handleVisibilityChange = () => {
-      // Browsers often drop Bluetooth connections on hidden tabs anyway.
-      // We explicitly stop to avoid "stuck" vibration states.
-      if (document.visibilityState === 'hidden') {
-        console.log("[DeviceManager] Page hidden, emergency stop triggered.");
+      if (document.visibilityState === 'hidden' && connectorModeRef.current === 'wasm') {
+        // WebBluetooth: browser may drop the BLE connection on hide, so stop explicitly.
+        // Intiface: the server holds device state independently — don't interrupt it.
+        console.log("[DeviceManager] Page hidden, WebBluetooth emergency stop.");
         stopAllDevices();
       }
     };
@@ -103,6 +127,9 @@ export function DeviceManager() {
       if (!client?.connected && devicesRef.current.length > 0) {
         setDevices([]);
         seenDeviceIndicesRef.current.clear();
+      }
+      if (!client?.connected && connectorModeRef.current === 'intiface' && intifaceConnectedRef.current) {
+        setIntifaceConnectedBoth(false);
       }
       return;
     }
@@ -191,20 +218,62 @@ export function DeviceManager() {
     return () => checkClient && clearInterval(checkClient);
   }, [attachListeners]);
 
+  const connectToIntiface = async () => {
+    setIsConnectingIntiface(true);
+    try {
+      const cl = await initToyClientIntiface(intifaceUrl);
+      attachListeners(cl);
+      setIntifaceConnectedBoth(true);
+      localStorage.setItem('tc_connector_mode', 'intiface');
+      localStorage.setItem('tc_intiface_url', intifaceUrl);
+      toast({ title: "Connected to Intiface Central" });
+      updateList();
+    } catch {
+      toast({
+        title: "Intiface Connection Failed",
+        description: "Make sure Intiface Central is running and Server Mode is enabled.",
+        variant: "destructive",
+      });
+      setIntifaceConnectedBoth(false);
+    } finally {
+      setIsConnectingIntiface(false);
+    }
+  };
+
+  const switchConnectorMode = async (mode: 'wasm' | 'intiface') => {
+    if (mode === connectorMode) return;
+    await disconnectToyClient();
+    setDevices([]);
+    seenDeviceIndicesRef.current.clear();
+    setIntifaceConnectedBoth(false);
+    setConnectorMode(mode);
+    connectorModeRef.current = mode;
+    localStorage.setItem('tc_connector_mode', mode);
+  };
+
   const toggleSearch = async () => {
-    const client = await initToyClient();
-    attachListeners(client);
+    let cl = getClient();
+
+    if (connectorMode === 'intiface') {
+      if (!cl?.connected) {
+        toast({ title: "Not connected to Intiface", description: "Click Connect first." });
+        return;
+      }
+    } else {
+      cl = await initToyClient();
+      attachListeners(cl);
+    }
 
     if (isConnecting) {
-      await client.stopScanning();
+      await cl.stopScanning();
       setIsConnecting(false);
       return;
     }
 
     setIsConnecting(true);
     try {
-      await client.startScanning();
-    } catch (err: any) {
+      await cl.startScanning();
+    } catch {
       setIsConnecting(false);
     }
   };
@@ -218,11 +287,6 @@ export function DeviceManager() {
     setActiveDevices(newArmed);
     setArmedIndices(newArmed);
     window.dispatchEvent(new CustomEvent('sync-toy-vibration'));
-
-    if (!isUpdatingRef.current) {
-      const lastValue = parseFloat(sessionStorage.getItem('lastVibrationValue') || '0');
-      if (lastValue > 0) applyVibrationSafe(lastValue);
-    }
   };
 
   const getBatteryIcon = (level: number | null) => {
@@ -262,6 +326,65 @@ export function DeviceManager() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
+            {/* Connector mode toggle */}
+            <div className="space-y-3">
+              <div className="flex bg-zinc-900/50 p-1 rounded-xl border border-white/5">
+                <button
+                  onClick={() => switchConnectorMode('wasm')}
+                  className={cn(
+                    "flex-1 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2",
+                    connectorMode === 'wasm' ? "bg-zinc-800 text-white shadow-sm" : "text-zinc-600 hover:text-zinc-400"
+                  )}
+                >
+                  <Bluetooth className="w-3.5 h-3.5" />
+                  WebBluetooth
+                </button>
+                <button
+                  onClick={() => switchConnectorMode('intiface')}
+                  className={cn(
+                    "flex-1 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2",
+                    connectorMode === 'intiface' ? "bg-zinc-800 text-white shadow-sm" : "text-zinc-600 hover:text-zinc-400"
+                  )}
+                >
+                  <Server className="w-3.5 h-3.5" />
+                  Intiface
+                </button>
+              </div>
+
+              {connectorMode === 'intiface' && (
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Server URL</label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={intifaceUrl}
+                      onChange={(e) => setIntifaceUrl(e.target.value)}
+                      placeholder="ws://127.0.0.1:12345"
+                      className="h-9 font-mono text-xs bg-zinc-900 border-white/10 focus-visible:ring-primary/40"
+                    />
+                    <Button
+                      onClick={connectToIntiface}
+                      disabled={isConnectingIntiface}
+                      variant={intifaceConnected ? "outline" : "default"}
+                      className="h-9 px-4 font-black uppercase text-[10px] tracking-widest shrink-0"
+                    >
+                      {isConnectingIntiface
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : intifaceConnected
+                          ? <><Check className="w-3.5 h-3.5 mr-1.5" />Connected</>
+                          : "Connect"
+                      }
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {intifaceConnected
+                      ? <><CircleDot className="w-2.5 h-2.5 text-primary" /><span className="text-[9px] font-black uppercase tracking-widest text-primary">Live — Intiface Central</span></>
+                      : <><Circle className="w-2.5 h-2.5 text-zinc-600" /><span className="text-[9px] font-black uppercase tracking-widest text-zinc-600">Open Intiface Central → Enable Server Mode</span></>
+                    }
+                  </div>
+                </div>
+              )}
+            </div>
+
             {devices.length > 0 ? (
               <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 no-scrollbar">
                 {devices.map((device) => {

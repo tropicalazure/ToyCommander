@@ -22,15 +22,21 @@ interface ReactiveMazeProps {
   remotePlayerPos?: { x: number; y: number } | null;
   remoteHazards?: Hazard[] | null;
   isSpectator?: boolean;
+  onMove?: () => void;
+  onWin?: () => void;
+  difficulty?: number; // 0-1, scales hazard speed
 }
 
-export function ReactiveMaze({ 
-  onVibrate, 
-  disabled = false, 
+export function ReactiveMaze({
+  onVibrate,
+  disabled = false,
   onGameStateChange,
   remotePlayerPos,
   remoteHazards,
-  isSpectator = false
+  isSpectator = false,
+  onMove,
+  onWin,
+  difficulty = 0,
 }: ReactiveMazeProps) {
   const [grid, setGrid] = useState<number[][]>([]);
   const [playerPos, setPlayerPos] = useState({ x: 1, y: 1 });
@@ -124,6 +130,7 @@ export function ReactiveMaze({
 
   useEffect(() => {
     if (isWon || disabled || isSpectator || grid.length === 0) return;
+    const intervalMs = Math.max(280, 600 - difficulty * 320);
     const interval = setInterval(() => {
       const nextHazards = hazardsRef.current.map(h => {
         if (h.waitCount > 0) return { ...h, waitCount: h.waitCount - 1 };
@@ -143,25 +150,28 @@ export function ReactiveMaze({
         if (hasShieldRef.current) { setHasShield(false); triggerVibration(1.0, 1000); }
         else { triggerVibration(1.0, 800); setPlayerPos({ x: 1, y: 1 }); }
       }
-    }, 600);
+    }, intervalMs);
     return () => clearInterval(interval);
-  }, [grid, isWon, disabled, isSpectator, mazeSize, triggerVibration]);
+  }, [grid, isWon, disabled, isSpectator, mazeSize, triggerVibration, difficulty]);
 
   const movePlayer = useCallback((dx: number, dy: number) => {
-    if (isWon || disabled || isSpectator) return;
-    const newX = playerPos.x + dx, newY = playerPos.y + dy;
+    if (isWonRef.current || disabled || isSpectator) return;
+    const newX = playerPosRef.current.x + dx, newY = playerPosRef.current.y + dy;
     if (newX >= 0 && newX < mazeSize && newY >= 0 && newY < mazeSize) {
-      if (grid[newY][newX] === 0) {
+      if (gridRef.current[newY][newX] === 0) {
         setPlayerPos({ x: newX, y: newY });
-        const hitHazard = hazards.some(h => h.x === newX && h.y === newY);
+        const hitHazard = hazardsRef.current.some(h => h.x === newX && h.y === newY);
         if (hitHazard) {
           if (hasShieldRef.current) { setHasShield(false); triggerVibration(1.0, 1000); }
           else { triggerVibration(1.0, 800); setPlayerPos({ x: 1, y: 1 }); }
-        } else triggerVibration(0.15, 50); 
-        if (newX === goalPos.x && newY === goalPos.y) { setIsWon(true); triggerVibration(1.0, 5000); }
+        } else {
+          triggerVibration(0.15, 50);
+          onMove?.();
+        }
+        if (newX === goalPos.x && newY === goalPos.y) { setIsWon(true); triggerVibration(1.0, 5000); onWin?.(); }
       } else triggerVibration(0.7, 150);
     }
-  }, [playerPos, grid, goalPos, hazards, isWon, disabled, isSpectator, mazeSize, triggerVibration]);
+  }, [disabled, isSpectator, mazeSize, goalPos, triggerVibration, onMove, onWin]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

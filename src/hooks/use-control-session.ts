@@ -4,20 +4,28 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { rtdb } from "@/lib/firebase";
 import { ref, onValue, set, onDisconnect, remove, get } from "firebase/database";
-import { 
-  getClient, 
-  applyVibrationSafe, 
-  isClientReady, 
-  stopAllDevices, 
-  setActiveDevices, 
-  getActiveDeviceIndices 
+import {
+  getClient,
+  applyVibrationSafe,
+  isClientReady,
+  stopAllDevices,
+  setActiveDevices,
+  getActiveDeviceIndices
 } from "@/lib/buttplug/toy-client";
-
-/**
- * Primary hook to manage session transport and hardware application.
- */
+import { registry } from "@/lib/vibration-patterns";
 
 export type SessionRole = 'local' | 'host' | 'remote';
+
+type SessionSnapshot = {
+  mode: string;
+  patternType: string | null;
+  speed: number;
+  manualValue: number;
+  savedAt?: number;
+};
+
+// How long with no RTDB update before the host runs the pattern locally
+const DROPOUT_THRESHOLD_MS = 2500;
 
 export function useControlSession(role: SessionRole, sessionId?: string) {
   const [connected, setConnected] = useState(false);
@@ -28,13 +36,30 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
   const [devices, setDevices] = useState<{ index: number; name: string; active: boolean }[]>([]);
   const [remoteUIState, setRemoteUIState] = useState<any>(null);
   const [isBackgrounded, setIsBackgrounded] = useState(false);
-  
+  const [isFallbackActive, setIsFallbackActive] = useState(false);
+
   const lastVibrationWriteRef = useRef(0);
   const lastVibrationAppliedRef = useRef(0);
+  // Refs so callbacks always read the latest value without stale closures
+  const pausedByRef = useRef<string | null>(null);
+  const sessionStatusRef = useRef<string | null>(null);
+  // Fallback loop state
+  const fallbackRafRef = useRef<number | null>(null);
+  const fallbackActiveRef = useRef(false);
+  // Timestamp of last real-time RTDB vibration update received by the host
+  const lastRtdbUpdateRef = useRef<number>(0);
+
+  const setPausedBySync = useCallback((val: string | null) => {
+    pausedByRef.current = val;
+    setPausedBy(val);
+  }, []);
+
+  useEffect(() => { sessionStatusRef.current = sessionStatus; }, [sessionStatus]);
 
   // Aggressive sync when coming back to foreground
   const forceSyncFromRemote = useCallback(async () => {
     if (!sessionId || role !== 'host') return;
+    if (pausedByRef.current) return;
     try {
       const snap = await get(ref(rtdb, `sessions/${sessionId}/vibration`));
       const val = snap.val() || 0;
@@ -58,9 +83,68 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [forceSyncFromRemote]);
 
+  // --- Fallback loop (host-side) ---
+
+  const stopFallback = useCallback(() => {
+    if (!fallbackActiveRef.current) return;
+    fallbackActiveRef.current = false;
+    setIsFallbackActive(false);
+    if (fallbackRafRef.current !== null) {
+      cancelAnimationFrame(fallbackRafRef.current);
+      fallbackRafRef.current = null;
+    }
+    console.log('[Session] Fallback stopped');
+  }, []);
+
+  const startFallback = useCallback((snapshot: SessionSnapshot) => {
+    if (fallbackActiveRef.current) return;
+
+    // Manual mode: hold the last intensity (no RAF needed)
+    if (snapshot.mode === 'manual') {
+      if (snapshot.manualValue < 0.05) return;
+      fallbackActiveRef.current = true;
+      setIsFallbackActive(true);
+      console.log(`[Session] Fallback: holding manual at ${Math.round(snapshot.manualValue * 100)}%`);
+      applyVibrationSafe(snapshot.manualValue);
+      setVibration(snapshot.manualValue);
+      return;
+    }
+
+    if (!snapshot.patternType) return;
+    const processor = registry.get(snapshot.patternType);
+    if (!processor) return;
+
+    fallbackActiveRef.current = true;
+    setIsFallbackActive(true);
+    console.log(`[Session] Fallback: running '${snapshot.patternType}' locally`);
+
+    const startTime = performance.now();
+    const loop = (time: number) => {
+      if (!fallbackActiveRef.current) return;
+      const elapsed = (time - startTime) / 1000;
+      const val = processor({ elapsed, speed: snapshot.speed ?? 0.5 });
+      if (val !== undefined) {
+        applyVibrationSafe(val);
+        setVibration(val);
+      }
+      fallbackRafRef.current = requestAnimationFrame(loop);
+    };
+    fallbackRafRef.current = requestAnimationFrame(loop);
+  }, []);
+
+  // --- Snapshot write (called by the controller/remote side) ---
+
+  const saveSnapshot = useCallback((state: Omit<SessionSnapshot, 'savedAt'>) => {
+    if (!sessionId || role === 'host') return;
+    set(ref(rtdb, `sessions/${sessionId}/snapshot`), {
+      ...state,
+      savedAt: Date.now(),
+    }).catch(() => {});
+  }, [sessionId, role]);
+
   // 1. Sync local devices with the UI (Host/Local only)
   const syncDevices = useCallback(() => {
-    if (role === 'remote') return; 
+    if (role === 'remote') return;
 
     if (isClientReady()) {
       const client = getClient();
@@ -94,10 +178,10 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
 
     if (sessionId) {
       const sessionPath = `sessions/${sessionId}`;
-      
+
       const presenceKey = role === 'host' ? 'hostActive' : 'controllerActive';
       const partnerKey = role === 'host' ? 'controllerActive' : 'hostActive';
-      
+
       const presenceRef = ref(rtdb, `${sessionPath}/${presenceKey}`);
       const partnerRef = ref(rtdb, `${sessionPath}/${partnerKey}`);
       const statusRef = ref(rtdb, `${sessionPath}/status`);
@@ -113,13 +197,17 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
       }
 
       const unsubPartner = onValue(partnerRef, (snap) => setPartnerConnected(!!snap.val()));
-      const unsubStatus = onValue(statusRef, (snap) => setSessionStatus(snap.val()));
-      const unsubPause = onValue(pauseRef, (snap) => setPausedBy(snap.val()));
+      const unsubStatus = onValue(statusRef, (snap) => {
+        sessionStatusRef.current = snap.val();
+        setSessionStatus(snap.val());
+      });
+      const unsubPause = onValue(pauseRef, (snap) => setPausedBySync(snap.val()));
       const unsubUI = onValue(uiStateRef, (snap) => {
         const state = snap.val();
         setRemoteUIState(state);
         if (role === 'host' && state?.activeDeviceIndices) {
           setActiveDevices(state.activeDeviceIndices);
+          syncDevices();
         }
       });
 
@@ -131,11 +219,15 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
 
       const unsubVibration = onValue(vibRef, (snap) => {
         const val = snap.val() || 0;
+        // Track the last time we received a live update from the controller
+        lastRtdbUpdateRef.current = Date.now();
         setVibration(val);
-        // Only host applies vibration to hardware
         if (role === 'host') {
-          // If we are backgrounded, the OS might block this, but we try anyway.
-          // The silent audio heartbeat trick in useWakeLock increases survival chances.
+          // Real-time update arrived — cancel fallback if it was running
+          if (fallbackActiveRef.current) {
+            stopFallback();
+            console.log('[Session] Real-time resumed, exiting fallback');
+          }
           applyVibrationSafe(val);
         }
       });
@@ -153,11 +245,38 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
     }
 
     return () => unsubConnection();
-  }, [sessionId, role]);
+  }, [sessionId, role, setPausedBySync, stopFallback, syncDevices]);
 
-  // 3. Actions
+  // 3. Host-side dropout detection: when real-time updates stop, run the
+  //    last saved snapshot locally so the device keeps going.
+  useEffect(() => {
+    if (role !== 'host' || !sessionId) return;
+
+    const check = setInterval(async () => {
+      // Skip if already in fallback, or if we've never received a live update
+      if (fallbackActiveRef.current) return;
+      if (lastRtdbUpdateRef.current === 0) return;
+      if (Date.now() - lastRtdbUpdateRef.current < DROPOUT_THRESHOLD_MS) return;
+
+      try {
+        const snap = await get(ref(rtdb, `sessions/${sessionId}/snapshot`));
+        const snapshot = snap.val() as SessionSnapshot | null;
+        if (snapshot) startFallback(snapshot);
+      } catch (e) {
+        console.warn('[Session] Snapshot read failed:', e);
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(check);
+      stopFallback();
+    };
+  }, [role, sessionId, startFallback, stopFallback]);
+
+  // 4. Actions
+  // Uses refs so stale closures in RAF/audio loops always see the latest pause state.
   const updateVibration = useCallback((val: number) => {
-    if (pausedBy || sessionStatus === 'ended') return;
+    if (pausedByRef.current || sessionStatusRef.current === 'ended') return;
 
     if (role === 'local') {
       applyVibrationSafe(val);
@@ -169,35 +288,44 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
         lastVibrationWriteRef.current = now;
       }
     }
-  }, [role, sessionId, pausedBy, sessionStatus]);
+  }, [role, sessionId]);
 
   const updateUIState = useCallback((state: any) => {
-    if (sessionId && sessionStatus !== 'ended') {
+    if (sessionId && sessionStatusRef.current !== 'ended') {
       set(ref(rtdb, `sessions/${sessionId}/uiState`), state);
     }
-  }, [sessionId, sessionStatus]);
+  }, [sessionId]);
 
   const togglePause = useCallback(() => {
-    if (!sessionId || sessionStatus === 'ended') return;
+    if (role === 'local') {
+      if (!pausedByRef.current) {
+        setPausedBySync('local');
+        applyVibrationSafe(0);
+      } else {
+        setPausedBySync(null);
+      }
+      return;
+    }
+    if (!sessionId || sessionStatusRef.current === 'ended') return;
     const pauseRef = ref(rtdb, `sessions/${sessionId}/pausedBy`);
     const vibRef = ref(rtdb, `sessions/${sessionId}/vibration`);
-    
-    if (!pausedBy) {
+
+    if (!pausedByRef.current) {
       set(pauseRef, role === 'host' ? 'host' : 'controller');
       set(vibRef, 0);
-    } else if (pausedBy === (role === 'host' ? 'host' : 'controller')) {
+    } else if (pausedByRef.current === (role === 'host' ? 'host' : 'controller')) {
       set(pauseRef, null);
     }
-  }, [sessionId, role, pausedBy, sessionStatus]);
+  }, [sessionId, role, setPausedBySync]);
 
   const toggleDevice = useCallback((index: number) => {
-    if (role === 'remote') return; 
-    
+    if (role === 'remote') return;
+
     setDevices(prev => {
       const newDevices = prev.map(d => d.index === index ? { ...d, active: !d.active } : d);
       const activeIndices = newDevices.filter(d => d.active).map(d => d.index);
       setActiveDevices(activeIndices);
-      
+
       if (sessionId && role === 'host') {
         set(ref(rtdb, `sessions/${sessionId}/devices`), newDevices);
       }
@@ -207,9 +335,11 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
 
   const endSession = useCallback(async () => {
     if (!sessionId) return;
+    stopFallback();
+    applyVibrationSafe(0);
     await set(ref(rtdb, `sessions/${sessionId}/status`), 'ended');
     setTimeout(() => remove(ref(rtdb, `sessions/${sessionId}`)), 1000);
-  }, [sessionId]);
+  }, [sessionId, stopFallback]);
 
   return {
     connected,
@@ -220,8 +350,10 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
     devices,
     remoteUIState,
     isBackgrounded,
+    isFallbackActive,
     updateVibration,
     updateUIState,
+    saveSnapshot,
     togglePause,
     toggleDevice,
     endSession
