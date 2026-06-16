@@ -21,6 +21,7 @@ import {
   SidebarGroup,
   SidebarTrigger,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
@@ -41,10 +42,17 @@ const items = [
 export function AppSidebar() {
   const pathname = usePathname();
   const [mounted, setMounted] = React.useState(false);
+  const { setOpenMobile, isMobile } = useSidebar();
 
   React.useEffect(() => {
     setMounted(true);
   }, []);
+
+  React.useEffect(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  }, [pathname, isMobile, setOpenMobile]);
 
   if (!mounted) return null;
   

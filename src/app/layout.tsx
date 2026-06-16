@@ -5,6 +5,7 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/ui/app-sidebar";
 import { Toaster } from "@/components/ui/toaster";
 import { DeviceManager } from "@/components/features/toycontrols/device-manager";
+import { MobileTabBar } from "@/components/ui/mobile-tab-bar";
 
 export const viewport: Viewport = {
   themeColor: '#FF00FF',
@@ -42,10 +43,11 @@ export default function RootLayout({
           <div className="flex min-h-screen w-full">
             <AppSidebar />
             <SidebarInset className="bg-transparent border-none">
-              <main className="flex-1 relative">
+              <main className="flex-1 relative pb-20 md:pb-0">
                 {children}
                 <DeviceManager />
               </main>
+              <MobileTabBar />
             </SidebarInset>
           </div>
         </SidebarProvider>

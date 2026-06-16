@@ -306,7 +306,7 @@ export function DeviceManager() {
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogTrigger asChild>
           <button className={cn(
-            "w-16 h-16 rounded-full shadow-2xl transition-all hover:scale-110 flex items-center justify-center border-2 bg-background/80 backdrop-blur-xl group",
+            "hidden md:flex w-16 h-16 rounded-full shadow-2xl transition-all hover:scale-110 items-center justify-center border-2 bg-background/80 backdrop-blur-xl group",
             devices.length > 0 ? "text-primary border-primary/40" : "text-muted-foreground border-primary/20"
           )}>
             <div className="relative">
