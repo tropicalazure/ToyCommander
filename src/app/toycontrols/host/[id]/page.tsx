@@ -19,7 +19,6 @@ import { ControlHub } from "@/components/features/toycontrols/control-hub";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { useControlSession } from "@/hooks/use-control-session";
 import { useVibrationEngine } from "@/hooks/use-vibration-engine";
-import { SessionOverlays } from "@/components/features/toycontrols/session-overlays";
 
 export default function HostSessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -115,12 +114,6 @@ export default function HostSessionPage({ params }: { params: Promise<{ id: stri
               onScanForDevices={openDeviceManager}
             />
 
-            <SessionOverlays 
-              role="host"
-              pausedBy={session.pausedBy}
-              sessionStatus={session.sessionStatus}
-              onTogglePause={session.togglePause}
-            />
           </div>
         </div>
       </div>

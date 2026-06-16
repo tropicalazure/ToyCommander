@@ -26,6 +26,10 @@ export default function RemoteControlPage({ params }: { params: Promise<{ id: st
 
   useWakeLock(true);
 
+  useEffect(() => {
+    if (session.sessionStatus === 'ended') engine.stopAll();
+  }, [session.sessionStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Keep a fresh ref so the interval below always reads the latest engine state
   // without needing to re-register the interval on every render.
   const engineRef = useRef(engine);
@@ -47,10 +51,20 @@ export default function RemoteControlPage({ params }: { params: Promise<{ id: st
     return () => clearInterval(interval);
   }, [engine.mode, engine.patternType, engine.pulseSpeed, session.saveSnapshot]);
 
+  const pausedByHost = session.pausedBy === 'host';
+  const pausedByController = session.pausedBy === 'controller';
+
   const sessionControls = (
     <div className="flex items-center gap-1">
-      <Button onClick={session.togglePause} variant={session.pausedBy === 'controller' ? "destructive" : "ghost"} size="icon" className="h-7 w-7 rounded-full">
-        {session.pausedBy === 'controller' ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+      <Button
+        onClick={session.togglePause}
+        disabled={pausedByHost}
+        variant={pausedByController ? "destructive" : "ghost"}
+        size="icon"
+        className="h-7 w-7 rounded-full"
+        title={pausedByHost ? "Paused by host" : undefined}
+      >
+        {pausedByController || pausedByHost ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
       </Button>
       <Button asChild variant="ghost" size="icon" className="h-7 w-7 rounded-full text-muted-foreground hover:text-destructive">
         <Link href="/"><LogOut className="w-3.5 h-3.5" /></Link>

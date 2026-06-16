@@ -54,10 +54,11 @@ export default function LocalControlPage() {
       <div className="flex-1 flex flex-col items-center">
         <div className="max-w-xl w-full space-y-4 md:space-y-6">
           <div className="relative">
-            <ControlHub 
+            <ControlHub
               {...engine}
               {...session}
               role="local"
+              onToggleDevice={session.toggleDevice}
               onScanForDevices={openDeviceManager}
               shareAction={
                 <Button 

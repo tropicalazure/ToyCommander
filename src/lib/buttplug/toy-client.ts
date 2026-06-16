@@ -214,6 +214,18 @@ export async function applyVibrationSafe(val: number) {
   }
 }
 
+/**
+ * Re-sends the last known vibration value to all armed devices. Use this after
+ * the active-device set changes (arm/disarm) so a newly armed device receives
+ * the current intensity immediately, even during a static hold where no new
+ * value would otherwise be written. Resets the dedupe guard to force the write.
+ */
+export async function reapplyVibration() {
+  const val = lastSentVibration < 0 ? 0 : lastSentVibration;
+  lastSentVibration = -1; // bypass the "same value" skip in applyVibrationSafe
+  return applyVibrationSafe(val);
+}
+
 export function toggleAllDevices(arm: boolean) {
   const currentClient = getClient();
   if (!currentClient || !currentClient.connected) return;

@@ -11,6 +11,16 @@ const firebaseConfig = {
   databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
 };
 
+const missingKeys = Object.entries(firebaseConfig)
+  .filter(([, value]) => !value)
+  .map(([key]) => key);
+if (missingKeys.length > 0) {
+  console.warn(
+    `[Firebase] Missing config values: ${missingKeys.join(', ')}. ` +
+    `Check that the NEXT_PUBLIC_FIREBASE_* env vars are set — RTDB calls will fail otherwise.`
+  );
+}
+
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 // Ensure the databaseURL is explicitly passed to getDatabase
 const rtdb = getDatabase(app, firebaseConfig.databaseURL);

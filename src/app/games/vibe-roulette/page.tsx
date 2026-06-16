@@ -112,10 +112,13 @@ export default function VibeRoulettePage() {
     setPhase('spinning');
     setLanded(null);
 
-    // After CSS transition (4s), resolve the landed segment
+    // After CSS transition (4s), resolve the landed segment.
+    // The needle is fixed at the top (0°) while the wheel rotates clockwise,
+    // so the segment under the needle is the one originally at (360 - rotation).
     spinTimeoutRef.current = setTimeout(() => {
       const normalised = ((newTotal % 360) + 360) % 360;
-      const segIdx = Math.floor(normalised / ANGLE) % N;
+      const pointerAngle = (360 - normalised) % 360;
+      const segIdx = Math.floor(pointerAngle / ANGLE) % N;
       setLanded(segIdx);
       setPhase('playing');
       setSpinsCount(c => c + 1);

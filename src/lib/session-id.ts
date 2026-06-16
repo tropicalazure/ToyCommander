@@ -17,11 +17,16 @@ const NOUNS = [
 ];
 
 /**
- * Generates a friendly cyber-themed ID like "neon-pulse"
+ * Generates a friendly cyber-themed ID like "neon-pulse-4827".
+ * The numeric suffix adds ~9000× more entropy than the word pair alone
+ * (400 combos → ~3.6M), making accidental collisions between concurrent
+ * sessions extremely unlikely. The host side should still treat a collision
+ * as possible and avoid clobbering an existing session.
  */
 export function generateFriendlyId(): string {
   const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
   const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
-  
-  return `${adj}-${noun}`;
+  const suffix = Math.floor(1000 + Math.random() * 9000); // 4-digit, 1000–9999
+
+  return `${adj}-${noun}-${suffix}`;
 }

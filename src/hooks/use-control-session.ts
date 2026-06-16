@@ -27,6 +27,9 @@ type SessionSnapshot = {
 // How long with no RTDB update before the host runs the pattern locally
 const DROPOUT_THRESHOLD_MS = 2500;
 
+// ~30fps for the fallback loop timer — enough for smooth pattern playback
+const FALLBACK_TICK_MS = 33;
+
 export function useControlSession(role: SessionRole, sessionId?: string) {
   const [connected, setConnected] = useState(false);
   const [partnerConnected, setPartnerConnected] = useState(false);
@@ -39,13 +42,14 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
   const [isFallbackActive, setIsFallbackActive] = useState(false);
 
   const lastVibrationWriteRef = useRef(0);
-  const lastVibrationAppliedRef = useRef(0);
   // Refs so callbacks always read the latest value without stale closures
   const pausedByRef = useRef<string | null>(null);
   const sessionStatusRef = useRef<string | null>(null);
   // Fallback loop state
-  const fallbackRafRef = useRef<number | null>(null);
+  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallbackActiveRef = useRef(false);
+  // Keep-alive AudioContext that exempts the tab from background timer throttling
+  const fallbackAudioCtxRef = useRef<AudioContext | null>(null);
   // Timestamp of last real-time RTDB vibration update received by the host
   const lastRtdbUpdateRef = useRef<number>(0);
 
@@ -85,21 +89,47 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
 
   // --- Fallback loop (host-side) ---
 
+  // Keep-alive AudioContext. Browsers throttle setTimeout to ~1000ms on hidden
+  // tabs unless audio is processing; a running AudioContext at near-zero output
+  // prevents that throttle so the fallback loop keeps firing at full rate.
+  const startFallbackAudio = useCallback(() => {
+    if (fallbackAudioCtxRef.current) return;
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      // 1 Hz at 0.00001 gain — subsonic frequency, inaudible at any volume
+      osc.frequency.value = 1;
+      gain.gain.value = 0.00001;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      fallbackAudioCtxRef.current = ctx;
+    } catch {}
+  }, []);
+
+  const stopFallbackAudio = useCallback(() => {
+    if (!fallbackAudioCtxRef.current) return;
+    try { fallbackAudioCtxRef.current.close(); } catch {}
+    fallbackAudioCtxRef.current = null;
+  }, []);
+
   const stopFallback = useCallback(() => {
     if (!fallbackActiveRef.current) return;
     fallbackActiveRef.current = false;
     setIsFallbackActive(false);
-    if (fallbackRafRef.current !== null) {
-      cancelAnimationFrame(fallbackRafRef.current);
-      fallbackRafRef.current = null;
+    if (fallbackTimerRef.current !== null) {
+      clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
     }
+    stopFallbackAudio();
     console.log('[Session] Fallback stopped');
-  }, []);
+  }, [stopFallbackAudio]);
 
   const startFallback = useCallback((snapshot: SessionSnapshot) => {
     if (fallbackActiveRef.current) return;
 
-    // Manual mode: hold the last intensity (no RAF needed)
+    // Manual mode: hold the last intensity (no loop needed)
     if (snapshot.mode === 'manual') {
       if (snapshot.manualValue < 0.05) return;
       fallbackActiveRef.current = true;
@@ -118,19 +148,26 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
     setIsFallbackActive(true);
     console.log(`[Session] Fallback: running '${snapshot.patternType}' locally`);
 
+    // Drive the loop with setTimeout rather than requestAnimationFrame: desktop
+    // browsers freeze/throttle RAF whenever the window is unfocused or the tab is
+    // hidden, which latches the toy at its last value (constant vibration). A
+    // self-scheduling setTimeout, paired with the keep-alive AudioContext below,
+    // keeps firing at full rate even in an unfocused or hidden tab.
+    startFallbackAudio();
+
     const startTime = performance.now();
-    const loop = (time: number) => {
+    const loop = () => {
       if (!fallbackActiveRef.current) return;
-      const elapsed = (time - startTime) / 1000;
+      const elapsed = (performance.now() - startTime) / 1000;
       const val = processor({ elapsed, speed: snapshot.speed ?? 0.5 });
       if (val !== undefined) {
         applyVibrationSafe(val);
         setVibration(val);
       }
-      fallbackRafRef.current = requestAnimationFrame(loop);
+      fallbackTimerRef.current = setTimeout(loop, FALLBACK_TICK_MS);
     };
-    fallbackRafRef.current = requestAnimationFrame(loop);
-  }, []);
+    fallbackTimerRef.current = setTimeout(loop, FALLBACK_TICK_MS);
+  }, [startFallbackAudio]);
 
   // --- Snapshot write (called by the controller/remote side) ---
 
@@ -145,6 +182,7 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
   // 1. Sync local devices with the UI (Host/Local only)
   const syncDevices = useCallback(() => {
     if (role === 'remote') return;
+    if (sessionStatusRef.current === 'ended') return;
 
     if (isClientReady()) {
       const client = getClient();
@@ -191,10 +229,10 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
       const devicesRef = ref(rtdb, `${sessionPath}/devices`);
 
       set(presenceRef, true);
-      onDisconnect(presenceRef).remove();
-      if (role === 'host') {
-        onDisconnect(ref(rtdb, sessionPath)).remove();
-      }
+      // On disconnect: mark presence false so the partner's "partnerConnected"
+      // goes false. Do NOT delete the entire session node — that would leave
+      // the remote in a zombie state on a brief network flap with no overlay.
+      onDisconnect(presenceRef).set(false);
 
       const unsubPartner = onValue(partnerRef, (snap) => setPartnerConnected(!!snap.val()));
       const unsubStatus = onValue(statusRef, (snap) => {
@@ -334,12 +372,12 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
   }, [sessionId, role]);
 
   const endSession = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId || role === 'remote') return;
     stopFallback();
     applyVibrationSafe(0);
     await set(ref(rtdb, `sessions/${sessionId}/status`), 'ended');
     setTimeout(() => remove(ref(rtdb, `sessions/${sessionId}`)), 1000);
-  }, [sessionId, stopFallback]);
+  }, [sessionId, role, stopFallback]);
 
   return {
     connected,

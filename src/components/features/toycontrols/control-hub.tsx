@@ -159,13 +159,19 @@ export function ControlHub(props: ControlHubProps) {
   const [showEndConfirmation, setShowEndConfirmation] = useState(false);
   const [localSubMode, setLocalSubMode] = useState<'slider' | 'touch'>('slider');
   const [localIntensity, setLocalIntensity] = useState(props.manualValue * 100);
-  const [history, setHistory] = useState<number[]>(Array(60).fill(0));
+  const historyRef = useRef<number[]>(Array(60).fill(0));
+  const latestVibrationRef = useRef(props.vibration);
+  latestVibrationRef.current = props.vibration;
+  const [, forceHistoryUpdate] = useReducer((x: number) => x + 1, 0);
   const [isInteracting, setIsInteracting] = useState(false);
   const [isMomentary, setIsMomentary] = useState(true); 
   const [touchX, setTouchX] = useState(0.5);
   const [ripples, dispatchRipples] = useReducer(rippleReducer, []);
   const touchAreaRef = useRef<HTMLDivElement>(null);
-  
+  // Throttle gate for outbound UI-state writes (RTDB) during rapid pad dragging.
+  const lastUIWriteRef = useRef(0);
+  const uiTrailingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Background reliability mode
   const { heartbeatActive, startHeartbeat, stopHeartbeat } = useWakeLock(true);
 
@@ -185,21 +191,42 @@ export function ControlHub(props: ControlHubProps) {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setHistory(prev => [...prev.slice(1), props.vibration]);
+      historyRef.current.push(latestVibrationRef.current);
+      historyRef.current.shift();
+      forceHistoryUpdate();
     }, 50);
     return () => clearInterval(interval);
-  }, [props.vibration]);
+  }, []); // stable — reads vibration via ref, never needs restart
 
   useEffect(() => {
-    if (props.onUIChange && props.role !== 'host') {
-      props.onUIChange({
-        mode: props.mode,
-        subMode: localSubMode,
-        touchX: touchX,
-        manualValue: props.manualValue,
-        patternType: props.patternType
-      });
+    const onUIChange = props.onUIChange;
+    if (!onUIChange || props.role === 'host') return;
+
+    const payload = {
+      mode: props.mode,
+      subMode: localSubMode,
+      touchX: touchX,
+      manualValue: props.manualValue,
+      patternType: props.patternType
+    };
+
+    // Throttle to ~80ms with a trailing flush so dragging the touch pad doesn't
+    // spam RTDB, while still guaranteeing the final position is written.
+    const flush = () => {
+      lastUIWriteRef.current = Date.now();
+      onUIChange(payload);
+    };
+    const sinceLast = Date.now() - lastUIWriteRef.current;
+    if (sinceLast > 80) {
+      flush();
+    } else {
+      if (uiTrailingRef.current) clearTimeout(uiTrailingRef.current);
+      uiTrailingRef.current = setTimeout(flush, 80 - sinceLast);
     }
+
+    return () => {
+      if (uiTrailingRef.current) clearTimeout(uiTrailingRef.current);
+    };
   }, [props.mode, localSubMode, touchX, props.manualValue, props.patternType, props.role, props.onUIChange]);
 
   // --- Handlers ---
@@ -374,7 +401,7 @@ export function ControlHub(props: ControlHubProps) {
         </div>
 
         <div className="relative h-12 bg-black border-b border-white/5 flex items-end px-4 gap-[1px]">
-            {history.map((val, i) => (
+            {historyRef.current.map((val, i) => (
               <div key={i} className="flex-1 bg-primary/40 rounded-t-[1px]" style={{ height: `${val * 100}%`, opacity: 0.2 + (val * 0.8) }} />
             ))}
             <div className="absolute top-2 left-4 text-[8px] font-black text-zinc-700 uppercase tracking-widest">Live Trace</div>
@@ -438,7 +465,7 @@ export function ControlHub(props: ControlHubProps) {
                   return (
                     <button
                       key={pat}
-                      onClick={() => !(isGhostMode || props.disabled) && props.setPattern(pat)}
+                      onClick={() => !(isGhostMode || props.disabled) && props.setPattern(isActive ? null : pat)}
                       disabled={isGhostMode || !!props.disabled}
                       className="w-[calc(50%-6px)] md:w-[calc(25%-9px)] h-36 rounded-2xl border transition-all duration-300 active:scale-95 overflow-hidden flex flex-col px-4 pt-4 pb-3 bg-zinc-900 hover:bg-zinc-800/80 disabled:opacity-40 disabled:cursor-not-allowed"
                       style={isActive ? {

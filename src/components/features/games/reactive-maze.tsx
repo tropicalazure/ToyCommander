@@ -18,7 +18,6 @@ interface Hazard {
 interface ReactiveMazeProps {
   onVibrate: (power: number) => void;
   disabled?: boolean;
-  onGameStateChange?: (state: any) => void;
   remotePlayerPos?: { x: number; y: number } | null;
   remoteHazards?: Hazard[] | null;
   isSpectator?: boolean;
@@ -30,7 +29,6 @@ interface ReactiveMazeProps {
 export function ReactiveMaze({
   onVibrate,
   disabled = false,
-  onGameStateChange,
   remotePlayerPos,
   remoteHazards,
   isSpectator = false,

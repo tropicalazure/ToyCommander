@@ -203,8 +203,9 @@ export default function RhythmPulsePage() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (audioUrl) URL.revokeObjectURL(audioUrl);
-    // Clear cached media source so next startDirectSync re-creates it for the new element
-    mediaSourceRef.current = null;
+    // NOTE: do NOT null mediaSourceRef here. createMediaElementSource() may only
+    // be called once per <audio> element, and the element is reused across files
+    // (only its src changes). The existing source node keeps routing the new track.
     const url = URL.createObjectURL(file);
     setAudioUrl(url);
     setFileName(file.name);

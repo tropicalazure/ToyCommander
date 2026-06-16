@@ -135,22 +135,27 @@ export default function TempoStrikePage() {
     let dur: number;
     let pts: number;
 
+    // Resolve the next combo synchronously so scoring uses the up-to-date
+    // multiplier (reading comboRef inside a setCombo updater would lag by one).
+    let nextCombo: number;
     if (closestMs <= PERFECT_MS) {
       label = 'PERFECT'; intensity = 1.0; dur = 280; pts = 30;
-      setCombo(c => { const n = Math.min(c + 1, 8); comboRef.current = n; return n; });
+      nextCombo = Math.min(comboRef.current + 1, 8);
       setPerfectStrikes(s => s + 1);
     } else if (closestMs <= GOOD_MS) {
       label = 'GOOD'; intensity = 0.7; dur = 200; pts = 20;
-      setCombo(c => { const n = Math.min(c + 1, 8); comboRef.current = n; return n; });
+      nextCombo = Math.min(comboRef.current + 1, 8);
     } else if (closestMs <= OK_MS) {
       label = 'OK'; intensity = 0.4; dur = 130; pts = 10;
-      setCombo(c => { const n = Math.min(c + 1, 8); comboRef.current = n; return n; });
+      nextCombo = Math.min(comboRef.current + 1, 8);
     } else {
       label = 'MISS'; intensity = 0.06; dur = 80; pts = 0;
-      setCombo(0); comboRef.current = 0;
+      nextCombo = 0;
     }
 
-    setScore(s => s + pts * comboRef.current);
+    comboRef.current = nextCombo;
+    setCombo(nextCombo);
+    setScore(s => s + pts * nextCombo);
     setTotalStrikes(s => s + 1);
     showFeedback(label, intensity, dur);
   }, [phase, showFeedback]);

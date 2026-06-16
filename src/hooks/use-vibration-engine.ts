@@ -60,7 +60,8 @@ export function useVibrationEngine({ onValueChange, disabled = false }: UseVibra
   useEffect(() => { manualValueRef.current = manualValue; }, [manualValue]);
 
   useEffect(() => {
-    return registry.subscribe(() => setAvailablePatterns(registry.getAllIds()));
+    const unsubscribe = registry.subscribe(() => setAvailablePatterns(registry.getAllIds()));
+    return () => { unsubscribe(); };
   }, []);
 
   // --- Background keep-alive AudioContext ---
@@ -69,6 +70,8 @@ export function useVibrationEngine({ onValueChange, disabled = false }: UseVibra
 
   const startBgAudio = useCallback(() => {
     if (bgAudioCtxRef.current) return;
+    // Don't create a second AudioContext if the mic analyser is already running
+    if (audioContextRef.current?.state === 'running') return;
     try {
       const ctx = new AudioContext();
       const osc = ctx.createOscillator();
@@ -103,36 +106,33 @@ export function useVibrationEngine({ onValueChange, disabled = false }: UseVibra
     currentLoopFnRef.current = null;
   }, []);
 
-  // Schedule the next loop tick: RAF when visible, setTimeout when hidden
+  // Schedule the next loop tick. We always use setTimeout rather than RAF:
+  // RAF is frozen/throttled by desktop browsers whenever the window is merely
+  // unfocused (clicking another app) — and that does NOT fire `visibilitychange`,
+  // so an RAF-driven loop silently stalls and the toy latches its last value
+  // (the "constant vibration" symptom). setTimeout keeps firing in an unfocused
+  // but visible window, and — paired with the running keep-alive AudioContext
+  // (see startBgAudio) — keeps firing at full rate even in a hidden tab.
   const scheduleLoop = useCallback((fn: () => void) => {
-    if (document.visibilityState === 'hidden') {
-      bgTimerRef.current = setTimeout(fn, BG_TICK_MS);
+    if (animationRef.current !== null) {
+      cancelAnimationFrame(animationRef.current);
       animationRef.current = null;
-    } else {
-      animationRef.current = requestAnimationFrame(fn);
-      bgTimerRef.current = null;
     }
+    bgTimerRef.current = setTimeout(fn, BG_TICK_MS);
   }, []);
 
-  // When the tab goes to background, RAF freezes in place — restart as timer.
-  // When returning to foreground, the loop switches back to RAF on its next tick.
+  // Safety net: if the tab is hidden while a system is running, make sure the
+  // keep-alive audio is up (it's normally started at pattern/loop start, under
+  // the user gesture, so it begins in the `running` state).
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === 'hidden') {
-        if (animationRef.current !== null && currentLoopFnRef.current) {
-          cancelAnimationFrame(animationRef.current);
-          animationRef.current = null;
-          startBgAudio();
-          bgTimerRef.current = setTimeout(currentLoopFnRef.current, BG_TICK_MS);
-        }
-      } else {
-        stopBgAudio();
-        // Loop reschedules itself as RAF on the next tick automatically
+      if (document.visibilityState === 'hidden' && currentLoopFnRef.current) {
+        startBgAudio();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [startBgAudio, stopBgAudio]);
+  }, [startBgAudio]);
 
   // --- Core emit + transition ---
 
@@ -196,6 +196,7 @@ export function useVibrationEngine({ onValueChange, disabled = false }: UseVibra
     if (disabled || !type) {
       if (!type) {
         cancelAllTimers();
+        stopBgAudio();
         setPatternType(null);
         setIsSystemRunning(false);
         crossfadeTo(0, BLEND_DURATION_MS);
@@ -208,14 +209,19 @@ export function useVibrationEngine({ onValueChange, disabled = false }: UseVibra
 
     setPatternType(type);
     setIsSystemRunning(true);
+    // Start the keep-alive AudioContext now, while we're still inside the user's
+    // click. Created here it begins in the `running` state, which exempts the
+    // tab from background timer throttling so the pattern keeps playing when the
+    // window is unfocused or hidden. (No-op if the mic analyser is already live.)
+    startBgAudio();
     startTimeRef.current = performance.now();
 
     const blendFrom = emittedRef.current;
+    const processor = registry.get(type);
 
     const loop = () => {
       const now = performance.now();
       const elapsed = (now - startTimeRef.current) / 1000;
-      const processor = registry.get(type);
       const patternVal = processor ? processor({ elapsed, speed: pulseSpeedRef.current }) : undefined;
 
       if (patternVal !== undefined) {
@@ -230,7 +236,7 @@ export function useVibrationEngine({ onValueChange, disabled = false }: UseVibra
 
     currentLoopFnRef.current = loop;
     scheduleLoop(loop);
-  }, [disabled, throttledEmit, cancelAllTimers, cancelTransition, crossfadeTo, scheduleLoop]);
+  }, [disabled, throttledEmit, cancelAllTimers, cancelTransition, crossfadeTo, scheduleLoop, startBgAudio, stopBgAudio]);
 
   const toggleAudio = async () => {
     if (disabled) return;
@@ -260,9 +266,9 @@ export function useVibrationEngine({ onValueChange, disabled = false }: UseVibra
       ctx.createMediaStreamSource(stream).connect(analyser);
       setIsAudioActive(true);
       setIsSystemRunning(true);
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
       const loop = () => {
         if (!analyserRef.current) return;
-        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
         analyserRef.current.getByteFrequencyData(dataArray);
         let sum = 0;
         for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
@@ -281,6 +287,7 @@ export function useVibrationEngine({ onValueChange, disabled = false }: UseVibra
   const handleModeChange = (newMode: string) => {
     if (disabled) return;
     cancelAllTimers();
+    stopBgAudio();
     if (audioContextRef.current) audioContextRef.current.suspend().catch(() => {});
     setIsAudioActive(false);
     setIsSystemRunning(false);

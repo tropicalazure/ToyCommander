@@ -38,7 +38,8 @@ import {
   requestBatterySafe,
   stopAllDevices,
   getActiveDeviceIndices,
-  setActiveDevices
+  setActiveDevices,
+  reapplyVibration
 } from "@/lib/buttplug/toy-client";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -286,7 +287,9 @@ export function DeviceManager() {
     
     setActiveDevices(newArmed);
     setArmedIndices(newArmed);
-    window.dispatchEvent(new CustomEvent('sync-toy-vibration'));
+    // Push the current intensity to the updated device set immediately so a
+    // newly armed device responds even during a static manual hold.
+    reapplyVibration();
   };
 
   const getBatteryIcon = (level: number | null) => {

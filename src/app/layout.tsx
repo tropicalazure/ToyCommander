@@ -10,8 +10,7 @@ export const viewport: Viewport = {
   themeColor: '#FF00FF',
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // Pinch-zoom left enabled for accessibility (no maximumScale / userScalable lock).
 };
 
 export const metadata: Metadata = {
