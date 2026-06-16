@@ -299,7 +299,7 @@ export function DeviceManager() {
     return <Battery className="w-4 h-4 text-destructive animate-pulse" />;
   };
 
-  if (pathname?.includes('/remote')) return null;
+  if (pathname?.includes('/remote') || pathname?.includes('/ds-mode/dom')) return null;
 
   return (
     <div className="fixed bottom-8 right-8 z-[100]">

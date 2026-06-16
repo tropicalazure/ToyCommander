@@ -17,6 +17,7 @@ import {
   Dices,
   Brain,
   Zap,
+  Crown,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -83,6 +84,18 @@ const games = [
     status: "Live",
     category: "Random",
     url: "/games/vibe-roulette",
+  },
+  {
+    id: "ds-mode",
+    title: "D/s Mode",
+    description: "A live Dominance/submission scene. One holds the console, one surrenders the controls. Commands, begging, reward and punishment — the device is the dynamic.",
+    icon: Crown,
+    players: "2 Players",
+    duration: "Open",
+    imageId: "game-ds-mode",
+    status: "Live",
+    category: "D/s",
+    url: "/ds-mode",
   },
   {
     id: "pattern-memory",
