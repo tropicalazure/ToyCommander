@@ -12,6 +12,8 @@ import {
   LogOut,
   Globe
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { getAvatarColorClass } from "@/lib/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
@@ -94,10 +96,42 @@ export default function HostSessionPage({ params }: { params: Promise<{ id: stri
   );
 
   return (
-    <div className="min-h-screen bg-background p-3 md:p-6 flex flex-col pt-3 md:pt-4">
-      <header className="flex items-center gap-3 mb-4 md:mb-6 px-2 max-w-xl mx-auto w-full">
-        <div className="space-y-0.5"><h2 className="text-xl md:text-2xl font-black tracking-tighter text-white uppercase leading-none">TOY<span className="text-primary"> CONTROLS</span></h2><div className="flex items-center gap-1.5"><Globe className="w-2.5 h-2.5 text-primary animate-pulse" /><p className="text-[7px] font-black text-primary uppercase tracking-[0.2em]">Live Session Active</p></div></div>
+    <div className="min-h-screen bg-background p-3 md:p-6 flex flex-col pt-3 md:pt-4 animate-fade-in">
+      <header className="flex items-center justify-between gap-3 mb-4 md:mb-6 px-2 max-w-xl mx-auto w-full border-b border-border/20 pb-4">
+        <div className="space-y-0.5">
+          <h2 className="text-xl md:text-2xl font-black tracking-tighter text-white uppercase leading-none">TOY<span className="text-primary"> CONTROLS</span></h2>
+          <div className="flex items-center gap-1.5">
+            <Globe className="w-2.5 h-2.5 text-primary animate-pulse" />
+            <p className="text-[7px] font-black text-primary uppercase tracking-[0.2em]">Live Session Active</p>
+          </div>
+        </div>
+
+        {/* Partner Connection Banner */}
+        {session.partnerConnected ? (
+          session.controllerProfile ? (
+            <div className="flex items-center gap-2 p-1.5 px-3 bg-primary/10 border border-primary/20 rounded-full text-[10px] font-black text-white uppercase tracking-tight shrink-0">
+              <span className={cn(
+                "h-5 w-5 rounded-full flex items-center justify-center text-xs shrink-0",
+                getAvatarColorClass(session.controllerProfile.avatarColor)
+              )}>
+                {session.controllerProfile.avatarEmoji}
+              </span>
+              <span className="truncate max-w-[100px]">{session.controllerProfile.displayName}</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 p-1.5 px-3 bg-muted/30 border border-border/50 rounded-full text-[10px] font-black text-muted-foreground uppercase tracking-tight shrink-0">
+              <div className="h-5 w-5 rounded-full bg-accent/20 flex items-center justify-center text-xs">👤</div>
+              <span>Guest Partner</span>
+            </div>
+          )
+        ) : (
+          <div className="flex items-center gap-2 p-1.5 px-3 bg-muted/10 border border-border/20 rounded-full text-[10px] font-black text-muted-foreground uppercase tracking-tight shrink-0 animate-pulse">
+            <div className="h-5 w-5 rounded-full bg-muted/20 flex items-center justify-center text-[8px]">⏳</div>
+            <span>Waiting...</span>
+          </div>
+        )}
       </header>
+
 
       <div className="flex-1 flex flex-col items-center">
         <div className="max-w-xl w-full space-y-3 md:space-y-4">

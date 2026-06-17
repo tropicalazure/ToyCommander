@@ -6,6 +6,8 @@ import { AppSidebar } from "@/components/ui/app-sidebar";
 import { Toaster } from "@/components/ui/toaster";
 import { DeviceManager } from "@/components/features/toycontrols/device-manager";
 import { MobileTabBar } from "@/components/ui/mobile-tab-bar";
+import { AuthProvider } from "@/hooks/use-auth";
+import { InvitationListener } from "@/components/features/invitation-listener";
 
 export const viewport: Viewport = {
   themeColor: '#FF00FF',
@@ -39,20 +41,24 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body className="font-body antialiased selection:bg-primary/30">
-        <SidebarProvider>
-          <div className="flex min-h-screen w-full">
-            <AppSidebar />
-            <SidebarInset className="bg-transparent border-none">
-              <main className="flex-1 relative pb-20 md:pb-0">
-                {children}
-                <DeviceManager />
-              </main>
-              <MobileTabBar />
-            </SidebarInset>
-          </div>
-        </SidebarProvider>
-        <Toaster />
+        <AuthProvider>
+          <SidebarProvider>
+            <div className="flex min-h-screen w-full">
+              <AppSidebar />
+              <SidebarInset className="bg-transparent border-none">
+                <main className="flex-1 relative pb-20 md:pb-0">
+                  {children}
+                  <DeviceManager />
+                </main>
+                <MobileTabBar />
+              </SidebarInset>
+            </div>
+          </SidebarProvider>
+          <Toaster />
+          <InvitationListener />
+        </AuthProvider>
       </body>
     </html>
   );
 }
+

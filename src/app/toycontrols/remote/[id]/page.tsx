@@ -10,6 +10,8 @@ import {
   Play, 
   LogOut
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { getAvatarColorClass } from "@/lib/avatar";
 import { ControlHub } from "@/components/features/toycontrols/control-hub";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { useControlSession } from "@/hooks/use-control-session";
@@ -73,13 +75,35 @@ export default function RemoteControlPage({ params }: { params: Promise<{ id: st
   );
 
   return (
-    <div className="min-h-screen bg-background flex flex-col p-4 md:p-12 pt-8 md:pt-12">
-      <header className="flex items-center gap-4 px-2 mb-8 md:mb-12 max-w-xl mx-auto w-full">
+    <div className="min-h-screen bg-background flex flex-col p-4 md:p-12 pt-8 md:pt-12 animate-fade-in">
+      <header className="flex items-center justify-between gap-4 px-2 mb-8 md:mb-12 max-w-xl mx-auto w-full border-b border-border/20 pb-4">
         <div className="space-y-1">
-          <h2 className="text-2xl md:text-4xl font-black font-headline tracking-tighter text-white leading-none uppercase">TOY<span className="text-primary"> CONTROLS</span></h2>
-          <div className="flex items-center gap-2"><Globe className="w-3.5 h-3.5 text-primary animate-pulse" /><p className="text-[10px] font-black text-primary uppercase tracking-[0.4em]">Connected to Partner</p></div>
+          <h2 className="text-2xl md:text-3xl font-black font-headline tracking-tighter text-white leading-none uppercase">TOY<span className="text-primary"> CONTROLS</span></h2>
+          <div className="flex items-center gap-2">
+            <Globe className="w-3.5 h-3.5 text-primary animate-pulse" />
+            <p className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">Connected to Partner</p>
+          </div>
         </div>
+
+        {/* Host Connection Banner */}
+        {session.hostProfile ? (
+          <div className="flex items-center gap-2 p-1.5 px-3 bg-primary/10 border border-primary/20 rounded-full text-[10px] font-black text-white uppercase tracking-tight shrink-0">
+            <span className={cn(
+              "h-5 w-5 rounded-full flex items-center justify-center text-xs shrink-0",
+              getAvatarColorClass(session.hostProfile.avatarColor)
+            )}>
+              {session.hostProfile.avatarEmoji}
+            </span>
+            <span className="truncate max-w-[100px]">{session.hostProfile.displayName}</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 p-1.5 px-3 bg-muted/30 border border-border/50 rounded-full text-[10px] font-black text-muted-foreground uppercase tracking-tight shrink-0">
+            <div className="h-5 w-5 rounded-full bg-accent/20 flex items-center justify-center text-xs">👤</div>
+            <span>Guest Room</span>
+          </div>
+        )}
       </header>
+
 
       <div className="flex-1 flex flex-col items-center">
         <div className="max-w-xl w-full space-y-6 md:space-y-10">

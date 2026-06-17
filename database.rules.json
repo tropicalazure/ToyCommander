@@ -1,0 +1,74 @@
+{
+  "rules": {
+    // Default deny: any path not listed below is unreadable and unwritable.
+
+    // User profiles. Readable ONLY by the owner or an already-accepted partner
+    // (RTDB read cascades, so nothing private is nested here — see requests/
+    // invitations/partners below). Writable only by the owner.
+    "users": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('partners').child($uid).child(auth.uid).exists())",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+
+    // Reverse partner-code map. Resolvable by EXACT key only (no .read on the
+    // collection, so codes cannot be listed/enumerated). Holds just the display
+    // fields the owner chose to attach to a code they hand out. Each entry can
+    // only be created/updated by the user it points to.
+    "partnerCodes": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() ? newData.child('uid').val() === auth.uid : data.child('uid').val() === auth.uid)",
+        ".validate": "newData.hasChild('uid')"
+      }
+    },
+
+    // Incoming partner requests. Owner-read only. A sender may create/retract
+    // their own entry; the owner may delete (accept/decline). The entry's stored
+    // uid must match the sender key so requests cannot be spoofed.
+    "requests": {
+      "$ownerUid": {
+        ".read": "auth != null && auth.uid === $ownerUid",
+        "$fromUid": {
+          ".write": "auth != null && (auth.uid === $ownerUid || auth.uid === $fromUid)",
+          ".validate": "!newData.exists() || newData.child('uid').val() === $fromUid"
+        }
+      }
+    },
+
+    // Mutual partner lists. Owner-read only. Writable by either of the two
+    // parties so the accept/remove multi-path updates (which touch both sides)
+    // are allowed.
+    "partners": {
+      "$ownerUid": {
+        ".read": "auth != null && auth.uid === $ownerUid",
+        "$partnerUid": {
+          ".write": "auth != null && (auth.uid === $ownerUid || auth.uid === $partnerUid)"
+        }
+      }
+    },
+
+    // Play-invitation inboxes. Owner reads and deletes; any signed-in user (the
+    // host) may create a new invitation, but cannot read or overwrite existing
+    // ones (so an inbox can't be enumerated or tampered with).
+    "invitations": {
+      "$ownerUid": {
+        ".read": "auth != null && auth.uid === $ownerUid",
+        "$sessionId": {
+          ".write": "auth != null && (auth.uid === $ownerUid || !data.exists())"
+        }
+      }
+    },
+
+    // Live control sessions. Intentionally open to unauthenticated clients:
+    // guest partners join via a shared link with no account. The protection is
+    // the unguessable friendly session id, matching the app's existing model.
+    "sessions": {
+      "$sessionId": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+}

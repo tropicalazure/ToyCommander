@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getDatabase } from 'firebase/database';
+import { getAuth } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -24,5 +25,7 @@ if (missingKeys.length > 0) {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 // Ensure the databaseURL is explicitly passed to getDatabase
 const rtdb = getDatabase(app, firebaseConfig.databaseURL);
+const auth = getAuth(app);
 
-export { rtdb };
+export { rtdb, auth };
+

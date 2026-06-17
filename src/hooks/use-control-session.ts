@@ -13,6 +13,7 @@ import {
   getActiveDeviceIndices
 } from "@/lib/buttplug/toy-client";
 import { registry } from "@/lib/vibration-patterns";
+import { useAuth } from "@/hooks/use-auth";
 
 export type SessionRole = 'local' | 'host' | 'remote';
 
@@ -40,6 +41,10 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
   const [remoteUIState, setRemoteUIState] = useState<any>(null);
   const [isBackgrounded, setIsBackgrounded] = useState(false);
   const [isFallbackActive, setIsFallbackActive] = useState(false);
+  const [hostProfile, setHostProfile] = useState<any>(null);
+  const [controllerProfile, setControllerProfile] = useState<any>(null);
+  
+  const { profile } = useAuth();
 
   const lastVibrationWriteRef = useRef(0);
   // Refs so callbacks always read the latest value without stale closures
@@ -227,8 +232,22 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
       const vibRef = ref(rtdb, `${sessionPath}/vibration`);
       const uiStateRef = ref(rtdb, `${sessionPath}/uiState`);
       const devicesRef = ref(rtdb, `${sessionPath}/devices`);
+      const hostProfileRef = ref(rtdb, `${sessionPath}/hostProfile`);
+      const controllerProfileRef = ref(rtdb, `${sessionPath}/controllerProfile`);
 
       set(presenceRef, true);
+      
+      // Write profile metadata if user is logged in
+      if (profile) {
+        const profileKey = role === 'host' ? 'hostProfile' : 'controllerProfile';
+        set(ref(rtdb, `${sessionPath}/${profileKey}`), {
+          uid: profile.uid,
+          displayName: profile.displayName,
+          avatarColor: profile.avatarColor,
+          avatarEmoji: profile.avatarEmoji
+        });
+      }
+
       // On disconnect: mark presence false so the partner's "partnerConnected"
       // goes false. Do NOT delete the entire session node — that would leave
       // the remote in a zombie state on a brief network flap with no overlay.
@@ -255,6 +274,14 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
         }
       });
 
+      const unsubHostProfile = onValue(hostProfileRef, (snap) => {
+        if (snap.exists()) setHostProfile(snap.val());
+      });
+
+      const unsubControllerProfile = onValue(controllerProfileRef, (snap) => {
+        if (snap.exists()) setControllerProfile(snap.val());
+      });
+
       const unsubVibration = onValue(vibRef, (snap) => {
         const val = snap.val() || 0;
         // Track the last time we received a live update from the controller
@@ -278,12 +305,14 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
         unsubUI();
         unsubVibration();
         unsubDevices();
+        unsubHostProfile();
+        unsubControllerProfile();
         set(presenceRef, false);
       };
     }
 
     return () => unsubConnection();
-  }, [sessionId, role, setPausedBySync, stopFallback, syncDevices]);
+  }, [sessionId, role, setPausedBySync, stopFallback, syncDevices, profile]);
 
   // 3. Host-side dropout detection: when real-time updates stop, run the
   //    last saved snapshot locally so the device keeps going.
@@ -389,6 +418,8 @@ export function useControlSession(role: SessionRole, sessionId?: string) {
     remoteUIState,
     isBackgrounded,
     isFallbackActive,
+    hostProfile,
+    controllerProfile,
     updateVibration,
     updateUIState,
     saveSnapshot,
