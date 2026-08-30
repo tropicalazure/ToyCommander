@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef } from "react";
 import { 
   User, 
   signInWithEmailAndPassword, 
@@ -69,6 +69,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Set while signUp is writing the initial profile, so the auth listener's
+  // self-heal doesn't race it and create a second profile/partner code.
+  const signupInProgressRef = useRef(false);
+  // Dedupe concurrent self-heal attempts for the same missing profile.
+  const healingProfileRef = useRef(false);
+
   // Helper to generate a unique 6-character partner code
   const generatePartnerCode = async (): Promise<string> => {
     let attempts = 0;
@@ -84,6 +90,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     // Fallback if loop fails
     return `TC-${Math.floor(1000 + Math.random() * 9000)}`;
+  };
+
+  // Recreate a missing profile for an already-authenticated user. This recovers
+  // accounts whose sign-up DB writes failed (e.g. rules weren't published yet),
+  // turning a stranded "logged in but no profile" account into a non-event on
+  // the next load.
+  const ensureProfile = async (firebaseUser: User) => {
+    if (healingProfileRef.current) return;
+    healingProfileRef.current = true;
+    try {
+      const partnerCode = await generatePartnerCode();
+      const profileData = {
+        displayName: firebaseUser.email?.split("@")[0] || "Anonymous User",
+        avatarColor: DEFAULT_AVATAR_COLOR,
+        avatarEmoji: DEFAULT_AVATAR_EMOJI,
+        partnerCode,
+        status: "online" as const,
+        createdAt: Date.now(),
+      };
+      await set(ref(rtdb, `users/${firebaseUser.uid}`), profileData);
+      await set(ref(rtdb, `partnerCodes/${partnerCode}`), {
+        uid: firebaseUser.uid,
+        displayName: profileData.displayName,
+        avatarColor: profileData.avatarColor,
+        avatarEmoji: profileData.avatarEmoji,
+      });
+    } catch (e) {
+      // If this still fails (e.g. rules genuinely deny), leave profile null so
+      // the UI shows the signed-out affordance rather than spinning forever.
+      console.error("Failed to auto-create missing profile", e);
+    } finally {
+      healingProfileRef.current = false;
+    }
   };
 
   useEffect(() => {
@@ -109,6 +148,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setProfile({ uid: firebaseUser.uid, email: firebaseUser.email || "", ...snapshot.val() });
           } else {
             setProfile(null);
+            // Authenticated but no profile record. Unless sign-up is mid-flight
+            // (which writes it momentarily), this is an orphaned account — heal
+            // it. A successful write re-triggers this listener with the data.
+            if (!signupInProgressRef.current) {
+              ensureProfile(firebaseUser);
+            }
           }
           setLoading(false);
         });
@@ -163,10 +208,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     avatarEmoji: string
   ) => {
     setLoading(true);
+    signupInProgressRef.current = true;
     try {
       const credential = await createUserWithEmailAndPassword(auth, email, password);
       const newUser = credential.user;
-      
+
       const partnerCode = await generatePartnerCode();
 
       // Write public profile to RTDB
@@ -195,6 +241,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       setLoading(false);
       throw e;
+    } finally {
+      signupInProgressRef.current = false;
     }
   };
 
