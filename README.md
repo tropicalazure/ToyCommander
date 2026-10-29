@@ -22,7 +22,7 @@ A Next.js PWA for wirelessly controlling Bluetooth-connected intimate devices. S
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/aura17dev/toycommander.git
+git clone https://github.com/tropicalazure/toycommander.git
 cd toycommander
 npm install
 ```
